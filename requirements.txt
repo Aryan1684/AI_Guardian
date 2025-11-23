@@ -7,3 +7,4 @@ opencv-python
 numpy
 mediapipe
 google-generativeai
+gunicorn
