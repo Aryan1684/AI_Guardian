@@ -14,14 +14,35 @@ from bs4 import BeautifulSoup
 from PIL import Image
 import cv2
 import numpy as np
-import face_recognition
-from deepface import DeepFace
+import mediapipe as mp  # ✅ NEW: MediaPipe for face detection
+
 
 try:
     import google.generativeai as genai
 except ImportError:
     genai = None
     print("⚠️ google-generativeai not installed. Gemini features disabled.")
+
+# ============================================
+# MEDIAPIPE INITIALIZATION
+# ============================================
+
+mp_face_detection = mp.solutions.face_detection
+mp_face_mesh = mp.solutions.face_mesh
+
+# Initialize MediaPipe models
+face_detection = mp_face_detection.FaceDetection(
+    model_selection=1,  # 1 = full range (best for videos), 0 = short range
+    min_detection_confidence=0.5
+)
+
+face_mesh = mp_face_mesh.FaceMesh(
+    static_image_mode=False,
+    max_num_faces=1,
+    refine_landmarks=True,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
 
 # ============================================
 # FLASK APP INITIALIZATION
@@ -91,10 +112,6 @@ def get_subscriber_count():
 
 
 # ============================================
-# GEMINI AI CONFIGURATION
-# ============================================
-
-# ============================================
 # GEMINI AI CONFIGURATION WITH SMART MODEL FALLBACK
 # ============================================
 
@@ -108,10 +125,10 @@ def init_gemini_model():
     genai.configure(api_key=GEMINI_API_KEY)
 
     preferred_models = [
-        "models/gemini-2.5-flash-image",     # 🎯 Best for image/video deepfake analysis
-        "models/gemini-2.5-pro",             # 🧠 High-accuracy AI content inspection
-        "models/gemini-2.5-flash-live-preview",  # 📹 Live detection / streaming
-        "models/gemini-2.0-flash"            # ⚡ Fast fallback
+        "models/gemini-2.0-flash-exp",       # 🎯 Latest experimental
+        "models/gemini-1.5-flash",           # ⚡ Fast and efficient
+        "models/gemini-1.5-pro",             # 🧠 High accuracy
+        "models/gemini-pro-vision"           # 📸 Vision fallback
     ]
     
     for model_name in preferred_models:
@@ -141,6 +158,86 @@ ALLOWED_EXTENSIONS = {
 def allowed_file(filename, file_type):
     return '.' in filename and \
         filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS.get(file_type, set())
+
+
+# ============================================
+# MEDIAPIPE FACE ANALYSIS HELPERS
+# ============================================
+
+def extract_face_landmarks(image_rgb):
+    """Extract face landmarks using MediaPipe Face Mesh"""
+    try:
+        results = face_mesh.process(image_rgb)
+        if results.multi_face_landmarks:
+            landmarks = results.multi_face_landmarks[0]
+            # Convert to numpy array
+            h, w = image_rgb.shape[:2]
+            points = np.array([[lm.x * w, lm.y * h] for lm in landmarks.landmark])
+            return points
+        return None
+    except Exception as e:
+        print(f"⚠️ Landmark extraction failed: {e}")
+        return None
+
+
+def calculate_face_similarity(landmarks1, landmarks2):
+    """Calculate similarity between two sets of face landmarks"""
+    if landmarks1 is None or landmarks2 is None:
+        return 0.0
+    
+    try:
+        # Use subset of key landmarks for efficiency
+        key_indices = [1, 33, 61, 199, 263, 291]  # Eyes, nose, mouth corners
+        points1 = landmarks1[key_indices]
+        points2 = landmarks2[key_indices]
+        
+        # Normalize by face size
+        dist1 = np.linalg.norm(points1.max(axis=0) - points1.min(axis=0))
+        dist2 = np.linalg.norm(points2.max(axis=0) - points2.min(axis=0))
+        
+        if dist1 == 0 or dist2 == 0:
+            return 0.0
+        
+        points1_norm = (points1 - points1.mean(axis=0)) / dist1
+        points2_norm = (points2 - points2.mean(axis=0)) / dist2
+        
+        # Calculate normalized distance
+        distance = np.mean(np.linalg.norm(points1_norm - points2_norm, axis=1))
+        similarity = max(0, 1 - distance)
+        
+        return similarity
+    except Exception as e:
+        print(f"⚠️ Similarity calculation failed: {e}")
+        return 0.5
+
+
+def detect_face_quality(image_rgb):
+    """Analyze face quality metrics using MediaPipe"""
+    try:
+        results = face_detection.process(image_rgb)
+        
+        if not results.detections:
+            return {
+                'face_detected': False,
+                'confidence': 0.0,
+                'face_size': 0
+            }
+        
+        detection = results.detections[0]
+        bbox = detection.location_data.relative_bounding_box
+        
+        h, w = image_rgb.shape[:2]
+        face_area = bbox.width * bbox.height * w * h
+        
+        return {
+            'face_detected': True,
+            'confidence': detection.score[0],
+            'face_size': face_area,
+            'bbox': bbox
+        }
+    except Exception as e:
+        print(f"⚠️ Face quality detection failed: {e}")
+        return {'face_detected': False, 'confidence': 0.0, 'face_size': 0}
 
 
 # ============================================
@@ -194,7 +291,6 @@ def analyze_file():
         print(f"✅ Analysis complete: {result.get('classification', 'N/A')}")
         return jsonify(convert_to_serializable(result))
 
-
     except Exception as e:
         print(f"❌ Error in analyze_file: {str(e)}")
         import traceback
@@ -234,7 +330,6 @@ def analyze_text():
         print(f"✅ Text analysis complete: {result.get('classification', 'N/A')}")
         return jsonify(convert_to_serializable(result))
 
-
     except Exception as e:
         print(f"❌ Error in analyze_text: {str(e)}")
         return jsonify({'error': str(e)}), 500
@@ -258,7 +353,6 @@ def analyze_url():
 
         print(f"✅ URL analysis complete")
         return jsonify(convert_to_serializable(result))
-
 
     except Exception as e:
         print(f"❌ Error in analyze_url: {str(e)}")
@@ -306,7 +400,7 @@ def subscribe_email():
 
 
 # ============================================
-# ADVANCED DEEPFAKE / VIDEO ANALYSIS
+# ADVANCED DEEPFAKE / VIDEO ANALYSIS (MediaPipe)
 # ============================================
 
 def analyze_deepfake(filepath):
@@ -320,23 +414,26 @@ def analyze_deepfake(filepath):
 
 def analyze_video(filepath):
     """
-    Hybrid video analysis:
-    - Local ML: OpenCV + face_recognition (blur, consistency)
-    - Optional cloud: Gemini
+    Hybrid video analysis with MediaPipe:
+    - Face detection + tracking consistency
+    - Blur detection
+    - Optional Gemini API
     """
     try:
-        print("🎥 Starting advanced video deepfake analysis...")
+        print("🎥 Starting MediaPipe video deepfake analysis...")
         cap = cv2.VideoCapture(filepath)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         if total_frames == 0:
             raise RuntimeError("Cannot read video file")
 
-        frame_step = max(1, total_frames // 30)
+        frame_step = max(1, total_frames // 30)  # Sample 30 frames max
         blur_scores = []
+        face_confidences = []
         face_consistency_scores = []
-        prev_encoding = None
+        prev_landmarks = None
         frames_used = 0
+        faces_detected = 0
 
         while True:
             frame_idx = frames_used * frame_step
@@ -350,133 +447,179 @@ def analyze_video(filepath):
 
             frames_used += 1
 
+            # Blur detection
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             blur_scores.append(cv2.Laplacian(gray, cv2.CV_64F).var())
 
+            # Face analysis with MediaPipe
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            face_locs = face_recognition.face_locations(rgb, model='hog')
-            if face_locs:
-                encodings = face_recognition.face_encodings(rgb, face_locs)
-                if encodings:
-                    if prev_encoding is not None:
-                        dist = face_recognition.face_distance([prev_encoding], encodings[0])[0]
-                        face_consistency_scores.append(1 - dist)
-                    prev_encoding = encodings[0]
+            
+            # Face quality
+            face_info = detect_face_quality(rgb)
+            if face_info['face_detected']:
+                faces_detected += 1
+                face_confidences.append(face_info['confidence'])
+                
+                # Face landmarks for consistency
+                landmarks = extract_face_landmarks(rgb)
+                if landmarks is not None and prev_landmarks is not None:
+                    similarity = calculate_face_similarity(landmarks, prev_landmarks)
+                    face_consistency_scores.append(similarity)
+                prev_landmarks = landmarks
 
         cap.release()
 
+        # Calculate metrics
         avg_blur = np.mean(blur_scores) if blur_scores else 0
+        avg_face_conf = np.mean(face_confidences) if face_confidences else 0
         avg_consistency = np.mean(face_consistency_scores) if face_consistency_scores else 0.5
+        face_detection_rate = faces_detected / max(frames_used, 1)
 
+        # Local ML scoring
         local_prob = 0.15
+        
         if avg_blur < 100:
-            local_prob += 0.3
-        if avg_consistency < 0.7:
-            local_prob += 0.3
+            local_prob += 0.25  # Low blur = possible AI generation
+        
+        if avg_face_conf < 0.6:
+            local_prob += 0.20  # Low face confidence = suspicious
+        
+        if avg_consistency < 0.65:
+            local_prob += 0.25  # Inconsistent face = possible deepfake
+        
+        if face_detection_rate < 0.5:
+            local_prob += 0.15  # Few faces detected = suspicious
 
         local_prob = max(0.05, min(0.95, local_prob))
 
+        # Optional Gemini analysis
         api_prob = call_gemini_deepfake(filepath, content_type="video")
-        final_prob = round(0.6 * local_prob + 0.4 * api_prob, 3)
+        final_prob = round(0.65 * local_prob + 0.35 * api_prob, 3)
 
         classification = classify_probability(final_prob)
+
+        findings = [
+            f"✅ MediaPipe face detection: {faces_detected}/{frames_used} frames",
+            f"📊 Avg face confidence: {avg_face_conf:.2f}",
+            f"🔍 Face consistency: {avg_consistency:.2f}",
+            f"💫 Blur score: {avg_blur:.1f}",
+        ]
 
         return {
             'ai_probability': final_prob,
             'classification': classification,
-            'confidence': round(0.6 + abs(final_prob - 0.5), 3),
-            'details': f"Frames used: {frames_used}, Blur: {avg_blur:.1f}, Face consistency: {avg_consistency:.2f}",
-            'specific_findings': [
-                f"Average blur: {avg_blur:.1f}",
-                f"Face consistency score: {avg_consistency:.2f}",
-                "Local ML + Gemini hybrid detection"
-            ],
-            'recommendations': generate_recommendations(final_prob)
+            'confidence': round(0.65 + abs(final_prob - 0.5) * 0.7, 3),
+            'details': f"Analyzed {frames_used} frames with MediaPipe + OpenCV",
+            'specific_findings': findings,
+            'recommendations': generate_recommendations(final_prob),
+            'metadata': {
+                'frames_analyzed': frames_used,
+                'faces_detected': faces_detected,
+                'avg_blur': round(avg_blur, 2),
+                'avg_consistency': round(avg_consistency, 3)
+            }
         }
 
     except Exception as e:
         print(f"❌ Error in analyze_video: {e}")
+        import traceback
+        traceback.print_exc()
         return get_fallback_result("video")
 
 
 def analyze_image(filepath):
     """
-    Hybrid image analysis:
-    - Local ML: DeepFace + OpenCV stats
-    - Optional cloud: Gemini
+    Hybrid image analysis with MediaPipe:
+    - Face detection quality
+    - Facial landmark analysis
+    - Image statistics
+    - Optional Gemini
     """
     try:
-        print("🖼️ Starting advanced image deepfake analysis...")
+        print("🖼️ Starting MediaPipe image deepfake analysis...")
 
         img_cv = cv2.imread(filepath)
         if img_cv is None:
             raise RuntimeError("Cannot read image")
 
+        # Basic image statistics
         gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
         blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
         brightness = np.mean(gray)
         h, w = gray.shape[:2]
         resolution = w * h
 
-        # DeepFace analysis
-        deepface_prob_boost = 0.0
-        deepface_info = {}
-        try:
-            df_res = DeepFace.analyze(
-                img_path=filepath,
-                actions=['age', 'gender', 'emotion'],
-                enforce_detection=False
-            )
-            if isinstance(df_res, list):
-                df_res = df_res[0]
-            deepface_info = {
-                'age': df_res.get('age'),
-                'gender': df_res.get('gender'),
-                'emotion': df_res.get('dominant_emotion'),
-                'face_confidence': df_res.get('face_confidence', 0.8)
-            }
-            if df_res.get('face_confidence', 0.8) < 0.7:
-                deepface_prob_boost += 0.2
-        except Exception as e:
-            print(f"⚠️ DeepFace analysis failed: {e}")
+        # MediaPipe face analysis
+        rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+        face_info = detect_face_quality(rgb)
+        landmarks = extract_face_landmarks(rgb)
 
-        local_prob = 0.2 + deepface_prob_boost
+        # Local ML scoring
+        local_prob = 0.20
+        
         if blur_score < 100:
             local_prob += 0.25
+        
         if brightness < 50 or brightness > 200:
             local_prob += 0.15
-        if resolution in [512 * 512, 768 * 768, 1024 * 1024]:
-            local_prob += 0.2
+        
+        # Common AI-generated resolutions
+        if resolution in [262144, 589824, 1048576]:  # 512², 768², 1024²
+            local_prob += 0.20
+        
+        if face_info['face_detected']:
+            if face_info['confidence'] < 0.7:
+                local_prob += 0.15  # Low confidence = suspicious
+            
+            if landmarks is not None:
+                # Check landmark distribution (AI faces often too symmetric)
+                left_side = landmarks[:234]
+                right_side = landmarks[234:468]
+                if len(left_side) > 0 and len(right_side) > 0:
+                    symmetry = np.mean(np.abs(left_side[:, 0] - (w - right_side[:, 0])))
+                    if symmetry < w * 0.02:  # Too symmetric
+                        local_prob += 0.15
+        else:
+            local_prob += 0.10  # No face detected
 
         local_prob = max(0.05, min(0.95, local_prob))
 
+        # Optional Gemini analysis
         api_prob = call_gemini_deepfake(filepath, content_type="image")
-        final_prob = round(0.6 * local_prob + 0.4 * api_prob, 3)
+        final_prob = round(0.65 * local_prob + 0.35 * api_prob, 3)
 
         classification = classify_probability(final_prob)
 
         findings = [
-            f"Blur score: {blur_score:.1f}",
-            f"Brightness: {brightness:.1f}",
-            f"Resolution: {w}x{h} ({resolution} px)"
+            f"✅ MediaPipe analysis complete",
+            f"👤 Face detected: {face_info['face_detected']} (conf: {face_info['confidence']:.2f})" if face_info['face_detected'] else "❌ No face detected",
+            f"💫 Blur score: {blur_score:.1f}",
+            f"💡 Brightness: {brightness:.1f}",
+            f"📐 Resolution: {w}x{h} ({resolution:,} px)"
         ]
-        if deepface_info:
-            findings.append(f"DeepFace -> age: {deepface_info.get('age')}, "
-                            f"gender: {deepface_info.get('gender')}, "
-                            f"emotion: {deepface_info.get('emotion')}")
+
+        if landmarks is not None:
+            findings.append(f"🎯 {len(landmarks)} facial landmarks tracked")
 
         return {
             'ai_probability': final_prob,
             'classification': classification,
-            'confidence': round(0.6 + abs(final_prob - 0.5), 3),
-            'details': f"Advanced image analysis (OpenCV + DeepFace + Gemini).",
+            'confidence': round(0.65 + abs(final_prob - 0.5) * 0.7, 3),
+            'details': f"MediaPipe + OpenCV hybrid analysis",
             'specific_findings': findings,
             'recommendations': generate_recommendations(final_prob),
-            'deepface': deepface_info
+            'metadata': {
+                'face_detected': face_info['face_detected'],
+                'face_confidence': round(face_info['confidence'], 3) if face_info['face_detected'] else 0,
+                'blur_score': round(blur_score, 2),
+                'resolution': f"{w}x{h}"
+            }
         }
 
     except Exception as e:
         print(f"❌ Error in analyze_image: {e}")
+        import traceback
+        traceback.print_exc()
         return get_fallback_result("image")
 
 
@@ -528,9 +671,8 @@ TEXT:
 {text[:2000]}"""
             response = gemini_model.generate_content(prompt)
             result = parse_ai_response(response.text)
-            if 'ai_probability' not in result:
-                raise ValueError("No ai_probability from Gemini")
-            return result
+            if 'ai_probability' in result:
+                return result
         except Exception as e:
             print(f"⚠️ Gemini text analysis failed: {e}")
 
@@ -550,7 +692,7 @@ def analyze_text_smart(text):
     found = [phrase for phrase in indicators if phrase in text_lower]
 
     sentences = [s.strip() for s in text.split('.') if s.strip()]
-    avg_len = sum(len(s.split()) for s in sentences) /max(len(sentences), 1)
+    avg_len = sum(len(s.split()) for s in sentences) / max(len(sentences), 1)
     length_factor = 0.08 if 15 < avg_len < 25 else -0.05
 
     personal_count = text_lower.count(' i ') + text_lower.count(' my ')
@@ -804,9 +946,10 @@ def internal_error(error):
 
 if __name__ == '__main__':
     print("\n" + "=" * 60)
-    print("🔥 HYBRID AI / DEEPFAKE DETECTION - DESTINY CODER'S 2025")
+    print("🔥 MEDIAPIPE + OPENCV DEEPFAKE DETECTION - 2025")
     print("=" * 60)
     print(f"🤖 Gemini AI: {'✅ Enabled' if gemini_model else '⚠️ Disabled (local ML only)'}")
+    print(f"👤 MediaPipe: ✅ Enabled (Face Detection + Mesh)")
     print(f"🌐 Server: http://127.0.0.1:5000")
     print(f"📧 Subscribers file: {EMAIL_FILE} ({get_subscriber_count()} users)")
     print("=" * 60 + "\n")
