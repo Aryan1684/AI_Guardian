@@ -7,3 +7,7 @@ pillow
 jinja2
 mediapipe
 tensorflow
+Werkzeug
+requests
+opencv-python
+numpy
