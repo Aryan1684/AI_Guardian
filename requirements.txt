@@ -12,3 +12,6 @@ requests
 opencv-python
 numpy
 beautifulsoup4
+face_recognition
+cmake
+dlib
