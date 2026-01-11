@@ -2,9 +2,16 @@
    AI DETECTION SYSTEM - COMPLETE STYLES
    Premium Gold & Black Edition
    ============================================ */
+   /* ============================================
+   AI DETECTION SYSTEM - COMPLETE STYLES
+   ============================================ */
+
+html {
+    scroll-behavior: smooth; /* <--- THIS FIXES THE SCROLLING */
+}
 
 :root {
-    /* Color Palette - Premium Gold & Black */
+    /* ... (Keep your existing :root variables here) ... */
     --primary: #d4af37;
     --primary-dark: #b8960c;
     --primary-light: #f0d060;
@@ -14,15 +21,14 @@
     --danger: #dc3545;
     --success: #28a745;
     
-    /* Gradients - Gold Luxe */
+    /* Gradients */
     --gradient-primary: linear-gradient(135deg, #d4af37 0%, #f0d060 50%, #b8960c 100%);
     --gradient-success: linear-gradient(135deg, #28a745 0%, #5cb85c 100%);
     --gradient-danger: linear-gradient(135deg, #dc3545 0%, #ff6b6b 100%);
     --gradient-warning: linear-gradient(135deg, #ff9f1c 0%, #ffc107 100%);
     --gradient-gold: linear-gradient(135deg, #b8860b 0%, #d4af37 25%, #ffd700 50%, #d4af37 75%, #b8860b 100%);
-    --gradient-gold-shine: linear-gradient(45deg, #b8860b, #d4af37, #ffd700, #d4af37, #b8860b);
     
-    /* Neutral Colors - Deep Black */
+    /* Colors */
     --background: #0a0a0a;
     --surface: #141414;
     --surface-light: #1f1f1f;
@@ -30,35 +36,50 @@
     --text-secondary: #c0c0c0;
     --text-muted: #808080;
     
-    /* Spacing */
-    --spacing-xs: 0.5rem;
-    --spacing-sm: 1rem;
+    /* Spacing & Borders */
     --spacing-md: 1.5rem;
     --spacing-lg: 2rem;
     --spacing-xl: 3rem;
-    
-    /* Border Radius */
-    --radius-sm: 0.5rem;
     --radius-md: 1rem;
     --radius-lg: 1.5rem;
-    --radius-xl: 2rem;
     
-    /* Shadows - Gold Glow */
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
-    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
-    --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.4);
-    --shadow-gold: 0 0 30px rgba(212, 175, 55, 0.3);
-    
-    /* Glassmorphism - Dark Glass */
+    /* Glassmorphism */
     --glass-bg: rgba(20, 20, 20, 0.8);
     --glass-border: rgba(212, 175, 55, 0.2);
+    --shadow-gold: 0 0 30px rgba(212, 175, 55, 0.3);
 }
+
+/* ... PASTE THE REST OF YOUR CSS CODE BELOW THIS ... */
+/* (The rest of your CSS provided earlier was perfect, just keep it) */
+
+
+
 
 /* ============================================
    RESET & BASE
    ============================================ */
+/* ============================================
+   RESET & BASE (Update this section)
+   ============================================ */
 
+html {
+    scroll-behavior: smooth; /* <--- THIS FIXES THE SCROLLING */
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--background);
+    color: var(--text-primary);
+    line-height: 1.6;
+    overflow-x: hidden;
+    min-height: 100vh;
+}
 * {
     margin: 0;
     padding: 0;

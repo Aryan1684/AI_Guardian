@@ -15,7 +15,7 @@ const state = {
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log('%c🔥 AI Detection System Loaded', 'color: #6366f1; font-size: 20px; font-weight: bold;');
-    console.log('%cDestiny Coder\'s 2025', 'color: #ec4899; font-size: 14px;');
+    console.log('%cDestiny Coder\'s 2026', 'color: #ec4899; font-size: 14px;');
     
     initializeTabs();
     initializeContentTypeCards();
