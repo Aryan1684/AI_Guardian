@@ -36,7 +36,7 @@ except ImportError:
 # ============================================
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'dev-key-secret'
+app.config['SECRET_KEY'] = 'a9s8d7f6g5h4j3k2l1kjsbfhberw2'
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024 
 
 # ============================================
