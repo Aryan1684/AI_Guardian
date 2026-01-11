@@ -30,6 +30,9 @@ try:
     import google.generativeai as genai
 except ImportError:
     genai = None
+if genai:
+    os.environ["GEMINI_API_KEY"] = "AIzaSyBU0rtqNWCQ86Nn70WQh-cQJuwqlK_awlU"
+    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
 # ============================================
 # APP CONFIG
