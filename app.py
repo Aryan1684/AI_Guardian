@@ -104,7 +104,8 @@ def analyze_file():
                 result = simulate_analysis(file_type)
         else:
             # Fallback if libraries missing or audio
-            time.sleep(2) # Simulate work
+            # Fallback if libraries missing or audio
+            # removed artificial delay
             result = simulate_analysis(file_type)
 
         return jsonify(result)
@@ -122,65 +123,77 @@ def analyze_file():
                 pass
 
 @app.route('/api/analyze-text', methods=['POST'])
+@app.route('/api/analyze-text', methods=['POST'])
 def analyze_text():
     try:
         data = request.json
         text = data.get('text', '')
         mode = data.get('type', 'text')
-        
+
         if len(text) < 10:
-             return jsonify({'error': 'Text too short'}), 400
+            return jsonify({'error': 'Text too short'}), 400
 
-        # Simple Logic Analysis
-        ai_score = 0.1
-        findings = []
-        
-        # Check for AI-like words
-        ai_words = ['delve', 'multifaceted', 'comprehensive', 'landscape', 'crucial', 'furthermore']
-        count = sum(1 for w in ai_words if w in text.lower())
-        
-        if count > 2:
-            ai_score += 0.4
-            findings.append("Uses repetitive AI-typical vocabulary")
-        
-        if len(text) > 500 and text.count('.') < 5:
-             ai_score += 0.3
-             findings.append("Unnaturally long sentence structures")
+        words = text.split()
+        word_count = len(words)
+        sentence_count = max(1, text.count('.'))
 
-        # Randomize slightly for demo feel
-        ai_score = min(0.95, ai_score + random.uniform(0.0, 0.2))
-        
-        classification = "AI Generated" if ai_score > 0.6 else "Human Written"
-        if mode == 'news':
-            classification = "Likely Fake News" if ai_score > 0.6 else "Credible Source"
+        avg_sentence_length = word_count / sentence_count
+
+        # --- Feature scoring ---
+        score = 0
+
+        # Very long sentences → possible AI
+        if avg_sentence_length > 25:
+            score += 0.3
+
+        # Repetitive structure check
+        unique_words = len(set(words))
+        repetition_ratio = unique_words / word_count
+
+        if repetition_ratio < 0.5:
+            score += 0.3
+
+        # Overly formal vocabulary
+        ai_words = ['delve', 'multifaceted', 'comprehensive', 'furthermore']
+        ai_word_count = sum(1 for w in ai_words if w in text.lower())
+
+        if ai_word_count >= 2:
+            score += 0.2
+
+        # Normalize score
+        ai_score = min(score, 0.95)
+
+        # --- Classification ---
+        if mode == 'text':
+            classification = "AI Generated" if ai_score > 0.5 else "Human Written"
+        elif mode == 'news':
+            # For news: only style-based suspicion
+            classification = "Suspicious Writing Style" if ai_score > 0.5 else "Neutral Writing Style"
+        else:
+            classification = "Unknown"
 
         return jsonify({
             'ai_probability': round(ai_score, 2),
             'classification': classification,
-            'confidence': 0.89,
-            'details': f"Analyzed {len(text.split())} words. {mode.capitalize()} pattern detection complete.",
-            'specific_findings': findings if findings else ["Natural language patterns detected"],
-            'recommendations': ["Verify source"] if ai_score > 0.6 else ["Content looks safe"]
+            'confidence': round(0.7 + ai_score * 0.3, 2),
+            'details': f"Analyzed {word_count} words using structural language analysis.",
+            'specific_findings': [
+                f"Average sentence length: {round(avg_sentence_length,1)}",
+                f"Vocabulary diversity: {round(repetition_ratio,2)}"
+            ],
+            'recommendations': [
+                "Verify sources manually",
+                "Check author credibility"
+            ]
         })
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/analyze-url', methods=['POST'])
-def analyze_url():
-    # Placeholder for URL analysis
-    time.sleep(1.5)
-    return jsonify({
-        'ai_probability': 0.75,
-        'classification': "Unverified Source",
-        'confidence': 0.80,
-        'details': "Domain reputation check returned mixed results.",
-        'specific_findings': ["Clickbait title structure", "Lack of author metadata"]
-    })
 
 @app.route('/api/subscribe', methods=['POST'])
 def subscribe():
-    time.sleep(1)
+    # removed artificial delay
     return jsonify({'success': True, 'message': 'Successfully subscribed!'})
 
 # ============================================
