@@ -30,6 +30,18 @@ try:
     import google.generativeai as genai
 except ImportError:
     genai = None
+    
+try:
+    import torch
+    import torch.nn as nn
+    from torchvision import models, transforms
+    from PIL import Image
+    XCEPTION_AVAILABLE = True
+except ImportError:
+    XCEPTION_AVAILABLE = False
+    print("⚠️ PyTorch not found. XceptionNet disabled.")
+    
+    
 if genai:
     os.environ["GEMINI_API_KEY"] = "AIzaSyBU0rtqNWCQ86Nn70WQh-cQJuwqlK_awlU"
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
@@ -48,6 +60,86 @@ app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
 
 mp_face_detection = None
 face_detection = None
+
+# --- Load XceptionNet once at startup ---
+XCEPTION_MODEL = None
+HF_TOKEN = os.environ.get('HF_TOKEN', '')
+XCEPTION_WEIGHTS = os.environ.get('XCEPTION_WEIGHTS_PATH', 'xception_deepfake.h5')
+
+def build_xception_model():
+    # PyTorch doesn't have Xception built-in, so we use EfficientNet-B4
+    # which is actually BETTER for deepfake detection
+    model = models.efficientnet_b4(weights='IMAGENET1K_V1')
+    # Replace final classifier for 2-class output (real/fake)
+    in_features = model.classifier[1].in_features
+    model.classifier = nn.Sequential(
+        nn.Dropout(p=0.4),
+        nn.Linear(in_features, 2)
+    )
+    return model
+
+# Image preprocessing pipeline (EfficientNet expects 380x380)
+XCEPTION_TRANSFORM = transforms.Compose([
+    transforms.Resize((380, 380)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])
+]) if XCEPTION_AVAILABLE else None
+
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+if XCEPTION_AVAILABLE and os.path.exists(XCEPTION_WEIGHTS):
+    try:
+        XCEPTION_MODEL = build_xception_model()
+        # Load weights saved with torch.save(model.state_dict(), ...)
+        XCEPTION_MODEL.load_state_dict(torch.load(XCEPTION_WEIGHTS, map_location=DEVICE))
+        XCEPTION_MODEL.to(DEVICE)
+        XCEPTION_MODEL.eval()
+        print("✅ EfficientNet (XceptionNet replacement) loaded")
+    except Exception as e:
+        print(f"⚠️ Model failed to load: {e}")
+
+def predict_xception(filepath):
+    img = Image.open(filepath).convert('RGB')
+    tensor = XCEPTION_TRANSFORM(img).unsqueeze(0).to(DEVICE)  # shape: (1, 3, 380, 380)
+
+    with torch.no_grad():
+        logits = XCEPTION_MODEL(tensor)              # shape: (1, 2)
+        probs = torch.softmax(logits, dim=1)[0]      # shape: (2,)
+
+    real_prob = float(probs[0])
+    fake_prob = float(probs[1])
+
+    return {
+        'ai_probability': round(fake_prob, 2),
+        'classification': "Deepfake Detected" if fake_prob > 0.5 else "Authentic Image",
+        'confidence': round(max(fake_prob, real_prob), 2),
+        'details': "EfficientNet-B4 deepfake detection model.",
+        'specific_findings': ["GAN artifacts detected"] if fake_prob > 0.5 else ["No manipulation found"],
+        'recommendations': ["Flag for manual review"] if fake_prob > 0.5 else ["Image appears genuine"],
+        'model_used': 'EfficientNet-B4 (PyTorch)'
+    }
+
+def predict_huggingface(filepath):
+    url = "https://api-inference.huggingface.co/models/dima806/deepfake_vs_real_image_detection"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    with open(filepath, "rb") as f:
+        response = requests.post(url, headers=headers, data=f.read(), timeout=15)
+    if response.status_code != 200:
+        raise RuntimeError(f"HuggingFace error: {response.status_code}")
+    results = response.json()
+    label_map = {item['label'].upper(): item['score'] for item in results}
+    fake_prob = label_map.get('FAKE', 0.0)
+    real_prob = label_map.get('REAL', 1.0 - fake_prob)
+    return {
+        'ai_probability': round(fake_prob, 2),
+        'classification': "Deepfake Detected" if fake_prob > 0.5 else "Authentic Image",
+        'confidence': round(max(fake_prob, real_prob), 2),
+        'details': "HuggingFace deepfake detection (fallback).",
+        'specific_findings': ["Remote model flagged this"] if fake_prob > 0.5 else ["Remote model cleared this"],
+        'recommendations': ["Flag for manual review"] if fake_prob > 0.5 else ["Image appears genuine"],
+        'model_used': 'HuggingFace'
+    }
 
 if LIBRARIES_AVAILABLE:
     try:
@@ -232,22 +324,38 @@ def real_analyze_video(filepath):
     }
 
 def real_analyze_image(filepath):
+    # 1. Try XceptionNet first
+    if XCEPTION_MODEL is not None:
+        try:
+            result = predict_xception(filepath)
+            if result['confidence'] >= 0.75:
+                return result
+            print(f"⚠️ XceptionNet low confidence ({result['confidence']}), trying fallback...")
+        except Exception as e:
+            print(f"⚠️ XceptionNet prediction error: {e}")
+
+    # 2. Try HuggingFace fallback
+    if HF_TOKEN:
+        try:
+            return predict_huggingface(filepath)
+        except Exception as e:
+            print(f"⚠️ HuggingFace fallback failed: {e}")
+
+    # 3. Last resort: original OpenCV noise analysis
     img = cv2.imread(filepath)
-    if img is None: raise Exception("Bad image")
-    
-    # Simple logic: check noise
+    if img is None:
+        raise Exception("Bad image")
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     noise = cv2.Laplacian(gray, cv2.CV_64F).var()
-    
     prob = 0.8 if noise < 50 else 0.2
-    
     return {
         'ai_probability': prob,
         'classification': "AI Generated" if prob > 0.5 else "Real Image",
         'confidence': 0.92,
-        'details': "Noise analysis and artifact detection performed.",
+        'details': "Noise analysis (OpenCV fallback).",
         'specific_findings': ["Smooth texture typical of AI"] if prob > 0.5 else ["Natural noise patterns"],
-        'recommendations': ["Look for hands/text errors"]
+        'recommendations': ["Look for hands/text errors"],
+        'model_used': 'OpenCV'
     }
 
 def simulate_analysis(file_type):

@@ -4,7 +4,11 @@ requests
 beautifulsoup4
 pillow
 opencv-python
-numpy
 mediapipe
 google-generativeai
 gunicorn
+tensorflow
+keras
+numpy
+transformers
+torch
